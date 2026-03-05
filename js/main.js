@@ -4,9 +4,15 @@ const map = L.map('map', {
 }).setView([20, 0], 3);
 
 // base map
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  attribution: '&copy; OpenStreetMap contributors'
-}).addTo(map);
+L.tileLayer(
+  "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+  {
+    attribution: "&copy; OpenStreetMap &copy; CARTO",
+    subdomains: "abcd",
+    maxZoom: 20,
+    minZoom: 2
+  }
+).addTo(map);
 
 
 // lookup tables
