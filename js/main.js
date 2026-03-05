@@ -10,9 +10,9 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 
 
 // lookup tables
-let riverIndex = {};     // HYRIV_ID -> feature
-let upstreamIndex = {};  // HYRIV_ID -> [upstream features]
-let layerIndex = {};     // HYRIV_ID -> leaflet layer
+let riverIndex = {}; 
+let upstreamIndex = {}; 
+let layerIndex = {};
 
 let riversLayer;
 
@@ -39,7 +39,7 @@ fetch("data/rivers.geojson")
     });
 
 
-    // draw rivers
+    // rivers
     riversLayer = L.geoJSON(data, {
 
       style: {
@@ -52,7 +52,7 @@ fetch("data/rivers.geojson")
 
         const id = feature.properties.HYRIV_ID;
 
-        // store layer for O(1) lookup
+        // store layer for lookup
         layerIndex[id] = layer;
 
         layer.on("click", function() {
@@ -112,7 +112,7 @@ function highlightUpstream(feature) {
 }
 
 
-// highlight a single segment using O(1) lookup
+// highlight a single segment
 function highlightSegment(feature) {
 
   const id = feature.properties.HYRIV_ID;
