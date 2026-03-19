@@ -1,19 +1,97 @@
-<!DOCTYPE html>
-<html>
-    <head>
-        <title>Global Water Flow Explorer</title>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Global Water Flow Explorer</title>
+    <link href="https://api.fontshare.com/v2/css?f[]=satoshi@700,500,400&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/maplibre-gl/dist/maplibre-gl.css" />
+  </head>
+  <body>
+    <div id="map"></div>
 
-        <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <div id="ui">
+      <div id="header">
+        <div id="header-title">
+          <span class="title-drop">&#9651;</span>
+          <div>
+            <h1>Water Flow</h1>
+            <p>Global River & Ocean Explorer</p>
+          </div>
+        </div>
+      </div>
 
-        <style>
-            #map {
-                height: 100vh;
-            }
-        </style>
-    </head>
-    <body>
-        <div id="map"></div>
-        <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-        <script src="js/main.js"></script>
-    </body>
+      <div id="mode-tabs">
+        <button class="mode-tab active" data-mode="rivers">Rivers</button>
+        <button class="mode-tab" data-mode="currents">Currents</button>
+        <button class="mode-tab" data-mode="pollution">Pollution</button>
+      </div>
+
+      <div id="panel-rivers" class="mode-panel active">
+        <p class="panel-hint">Click any river segment to trace its full path to the ocean.</p>
+        <div id="compare-controls">
+          <button id="compare-btn">Compare Two Basins</button>
+          <button id="compare-clear" class="hidden">Clear</button>
+        </div>
+        <div id="compare-status" class="hidden">
+          <div class="compare-item" id="basin-a-label">
+            <span class="dot" style="background:#00d4ff"></span>
+            <span>Basin A — click a river</span>
+          </div>
+          <div class="compare-item" id="basin-b-label">
+            <span class="dot" style="background:#ff6b35"></span>
+            <span>Basin B — click a river</span>
+          </div>
+        </div>
+        <div id="river-stats" class="hidden">
+          <div class="stat-row"><span>River System</span><span id="stat-name">—</span></div>
+          <div class="stat-row"><span>Discharge</span><span id="stat-discharge">—</span></div>
+          <div class="stat-row"><span>Length to Ocean</span><span id="stat-length">—</span></div>
+          <div class="stat-row"><span>Basin Type</span><span id="stat-endorheic">—</span></div>
+          <div class="stat-row"><span>Stream Order</span><span id="stat-order">—</span></div>
+        </div>
+      </div>
+
+      <div id="panel-currents" class="mode-panel hidden">
+        <p class="panel-hint">Ocean surface currents from OSCAR NRT data (March 2026).</p>
+        <div class="toggle-row">
+          <span>Animate</span>
+          <label class="toggle">
+            <input type="checkbox" id="animate-toggle" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <span>Speed Coloring</span>
+          <label class="toggle">
+            <input type="checkbox" id="speed-color-toggle" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="stat-row"><span>Max Speed</span><span>~2.5 m/s</span></div>
+        <div class="stat-row"><span>Coverage</span><span>Global 0.25°</span></div>
+      </div>
+
+      <div id="panel-pollution" class="mode-panel hidden">
+        <p class="panel-hint">Drop a pollution particle on any river to simulate its path to the ocean.</p>
+        <div class="toggle-row">
+          <span>Drop Mode</span>
+          <label class="toggle">
+            <input type="checkbox" id="drop-toggle">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div id="pollution-stats" class="hidden">
+          <div class="stat-row"><span>Status</span><span id="poll-status">—</span></div>
+          <div class="stat-row"><span>Distance Left</span><span id="poll-distance">—</span></div>
+          <div class="stat-row"><span>Est. Time</span><span id="poll-time">—</span></div>
+        </div>
+        <button id="clear-pollution" class="hidden">Clear Particles</button>
+      </div>
+    </div>
+
+    <div id="tooltip" class="hidden"></div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
 </html>
