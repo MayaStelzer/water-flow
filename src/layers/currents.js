@@ -3,19 +3,24 @@ let vectors = [];
 let oceanVecs = [];
 let particles = [];
 let animFrame = null;
+let lastTick = 0;
 let animating = true;
 let speedColoring = true;
 let visible = false;
 
-const PARTICLE_COUNT = 2500;
-const SPEED_SCALE = 1.2;
-const MAX_AGE = 140;
-const TRAIL_LEN = 20;
+// ── Tunable defaults ──
+let PARTICLE_COUNT = 4000;
+let SPEED_SCALE    = 1.0;
+let MAX_AGE        = 500;
+let TRAIL_LEN      = 150;
+let FPS_CAP        = 10;
 
-const SOURCE_TRAILS  = 'currents-trails';
-const SOURCE_ARROWS  = 'currents-arrows';
-const LAYER_TRAIL    = 'currents-trail-lines';
-const LAYER_ARROW    = 'currents-arrow-symbols';
+// Step per tick: 0.25° * speed * vec_magnitude
+// At zoom 3, 0.25° ≈ 2px/tick, 150 trail pts = 300px ≈ 3 inches
+const BASE_STEP = 0.25;
+
+const SOURCE_TRAILS = 'currents-trails';
+const LAYER_TRAIL   = 'currents-trail-lines';
 
 export async function initCurrents(mapInstance) {
   map = mapInstance;
@@ -24,22 +29,13 @@ export async function initCurrents(mapInstance) {
   vectors = await res.json();
   oceanVecs = vectors.filter(v => v.speed > 0.02);
   buildVectorIndex();
-  buildArrowGrid();
   addLegend();
 
-  // Source for animated particle trails
   map.addSource(SOURCE_TRAILS, {
     type: 'geojson',
     data: emptyFC()
   });
 
-  // Source for static arrow grid
-  map.addSource(SOURCE_ARROWS, {
-    type: 'geojson',
-    data: emptyFC()
-  });
-
-  // Trail lines — fixed opacity, color per feature
   map.addLayer({
     id: LAYER_TRAIL,
     type: 'line',
@@ -51,100 +47,21 @@ export async function initCurrents(mapInstance) {
     },
     paint: {
       'line-color': ['get', 'color'],
-      'line-width': 1.8,
+      'line-width': [
+        'interpolate', ['linear'], ['zoom'],
+        2, 1.5,
+        5, 2.2,
+        8, 3.5
+      ],
       'line-opacity': ['get', 'op']
     }
   });
 
-  // Arrow symbols
-  // We draw arrows as small rotated line segments (chevrons) via symbol layer
-  // using a generated arrow image
-  createArrowImage();
-
-  map.addLayer({
-    id: LAYER_ARROW,
-    type: 'symbol',
-    source: SOURCE_ARROWS,
-    layout: {
-      'icon-image': 'arrow-icon',
-      'icon-size': ['interpolate', ['linear'], ['zoom'], 2, 0.4, 6, 0.8],
-      'icon-rotate': ['get', 'bearing'],
-      'icon-rotation-alignment': 'map',
-      'icon-allow-overlap': false,
-      'icon-ignore-placement': false,
-      visibility: 'none'
-    },
-    paint: {
-      'icon-color': ['get', 'color'],
-      'icon-opacity': ['interpolate', ['linear'], ['get', 'speed'], 0, 0.2, 0.5, 0.7, 2, 1.0]
-    }
-  });
-
   spawnParticles();
-}
 
-// ── Arrow image ──
-function createArrowImage() {
-  const size = 24;
-  const canvas = document.createElement('canvas');
-  canvas.width = size; canvas.height = size;
-  const ctx = canvas.getContext('2d');
-
-  // Draw a simple arrow pointing up (north = 0°)
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 2.5;
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-
-  // Shaft
-  ctx.beginPath();
-  ctx.moveTo(size/2, size * 0.75);
-  ctx.lineTo(size/2, size * 0.2);
-  ctx.stroke();
-
-  // Arrowhead
-  ctx.beginPath();
-  ctx.moveTo(size/2 - 4, size * 0.38);
-  ctx.lineTo(size/2, size * 0.2);
-  ctx.lineTo(size/2 + 4, size * 0.38);
-  ctx.stroke();
-
-  map.addImage('arrow-icon', { width: size, height: size,
-    data: ctx.getImageData(0, 0, size, size).data }, { sdf: true });
-}
-
-// ── Arrow grid (static, sampled every ~3°) ──
-function buildArrowGrid() {
-  // Called after vectors loaded; actual GeoJSON built in setVisible
-}
-
-function buildArrowFeatures() {
-  const features = [];
-  // Sample every 3° — gives ~4000 arrows globally
-  const step = 3;
-  for (let lon = -180; lon < 180; lon += step) {
-    for (let lat = -80; lat <= 80; lat += step) {
-      const vec = lookupVector(lon, lat);
-      if (!vec || vec.speed < 0.05) continue;
-
-      // Bearing: direction the current flows toward
-      // arctan2(u=east, v=north) → degrees from north
-      const bearing = (Math.atan2(vec.u, vec.v) * 180 / Math.PI + 360) % 360;
-
-      features.push({
-        type: 'Feature',
-        properties: {
-          bearing,
-          speed: vec.speed,
-          color: speedToColor(vec.speed),
-          u: vec.u.toFixed(2),
-          v: vec.v.toFixed(2)
-        },
-        geometry: { type: 'Point', coordinates: [lon, lat] }
-      });
-    }
-  }
-  return { type: 'FeatureCollection', features };
+  // Re-seed when map moves so new viewport area gets filled immediately
+  map.on('moveend', () => { if (visible) spawnParticles(); });
+  map.on('zoomend', () => { if (visible) spawnParticles(); });
 }
 
 // ── Vector index ──
@@ -161,24 +78,69 @@ function lookupVector(lon, lat) {
   return _index[`${snapLon},${snapLat}`] || null;
 }
 
-// ── Particles ──
+// ── Seed particles on a uniform grid across the current viewport ──
+// This guarantees dense coverage of whatever the user is looking at,
+// rather than randomly sampling a global ocean point cloud.
 function spawnParticles() {
+  const bounds = map.getBounds();
+  const west  = bounds.getWest();
+  const east  = bounds.getEast();
+  const south = bounds.getSouth();
+  const north = bounds.getNorth();
+
+  // Grid spacing in degrees — tighter = denser coverage
+  const spacing = 1.5;
+
+  const grid = [];
+  for (let lon = Math.floor(west / spacing) * spacing; lon <= east; lon += spacing) {
+    for (let lat = Math.floor(south / spacing) * spacing; lat <= north; lat += spacing) {
+      const vec = lookupVector(lon, lat);
+      if (vec && vec.speed > 0.02) {
+        grid.push({ lon, lat });
+      }
+    }
+  }
+
+  // Fill PARTICLE_COUNT slots from the grid, cycling through it
   particles = [];
+  if (grid.length === 0) return;
+
   for (let i = 0; i < PARTICLE_COUNT; i++) {
-    particles.push(newParticle(Math.floor(Math.random() * MAX_AGE)));
+    const g = grid[i % grid.length];
+    // Jitter so multiple particles per grid cell don't overlap exactly
+    particles.push({
+      lon: g.lon + (Math.random() - 0.5) * spacing,
+      lat: g.lat + (Math.random() - 0.5) * spacing,
+      age: Math.floor(Math.random() * MAX_AGE),
+      trail: []
+    });
   }
 }
 
-function newParticle(age = 0) {
+function newParticle() {
+  // Respawn within current viewport bounds
+  const bounds = map.getBounds();
+  const west  = bounds.getWest();
+  const east  = bounds.getEast();
+  const south = bounds.getSouth();
+  const north = bounds.getNorth();
+
+  // Try up to 20 random positions in the viewport until we find ocean
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const lon = west + Math.random() * (east - west);
+    const lat = south + Math.random() * (north - south);
+    const vec = lookupVector(lon, lat);
+    if (vec && vec.speed > 0.02) {
+      return { lon, lat, age: 0, trail: [] };
+    }
+  }
+
+  // Fallback: random global ocean point
   const v = oceanVecs[Math.floor(Math.random() * oceanVecs.length)];
-  return {
-    lon: v.lon + (Math.random() - 0.5) * 0.6,
-    lat: v.lat + (Math.random() - 0.5) * 0.6,
-    age,
-    trail: []
-  };
+  return { lon: v.lon, lat: v.lat, age: 0, trail: [] };
 }
 
+// ── Color ramp: slow=blue → fast=red ──
 function speedToColor(speed) {
   if (!speedColoring) return '#00d4ff';
   const t = Math.min(speed / 1.5, 1);
@@ -197,13 +159,19 @@ function speedToColor(speed) {
   }
 }
 
-// ── Tick ──
-function tick() {
+// ── Animation loop ──
+function tick(now) {
   if (!visible || !animating) {
-    if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
+    animFrame = null;
     map.getSource(SOURCE_TRAILS)?.setData(emptyFC());
     return;
   }
+
+  animFrame = requestAnimationFrame(tick);
+
+  const interval = 1000 / FPS_CAP;
+  if (now - lastTick < interval) return;
+  lastTick = now;
 
   const trailFeatures = [];
 
@@ -211,61 +179,53 @@ function tick() {
     p.age++;
 
     if (p.age > MAX_AGE) {
-      particles[i] = newParticle(0);
+      particles[i] = newParticle();
       return;
     }
 
     const vec = lookupVector(p.lon, p.lat);
     if (!vec || vec.speed < 0.02) {
-      particles[i] = newParticle(0);
+      particles[i] = newParticle();
       return;
     }
 
-    // Record position BEFORE advancing
     p.trail.push([p.lon, p.lat]);
     if (p.trail.length > TRAIL_LEN) p.trail.shift();
 
-    // Advance
-    p.lon += vec.u * SPEED_SCALE * 0.01;
-    p.lat += vec.v * SPEED_SCALE * 0.01;
-    if (p.lon > 180)  p.lon -= 360;
+    const step = BASE_STEP * SPEED_SCALE;
+    p.lon += vec.u * step;
+    p.lat += vec.v * step;
+    if (p.lon >  180) p.lon -= 360;
     if (p.lon < -180) p.lon += 360;
     p.lat = Math.max(-85, Math.min(85, p.lat));
 
     if (p.trail.length < 2) return;
 
     const lifeFrac = p.age / MAX_AGE;
-    const fade = lifeFrac < 0.12 ? lifeFrac / 0.12
-               : lifeFrac > 0.78 ? (1 - lifeFrac) / 0.22
+    const fade = lifeFrac < 0.04 ? lifeFrac / 0.04
+               : lifeFrac > 0.88 ? (1 - lifeFrac) / 0.12
                : 1;
 
-    // Split trail into segments so we can taper opacity
-    for (let s = 1; s < p.trail.length; s++) {
-      const segFrac = s / p.trail.length;
-      trailFeatures.push({
-        type: 'Feature',
-        properties: {
-          color: speedToColor(vec.speed),
-          op: fade * segFrac   // front of trail is brighter
-        },
-        geometry: {
-          type: 'LineString',
-          coordinates: [p.trail[s-1], p.trail[s]]
-        }
-      });
-    }
+    trailFeatures.push({
+      type: 'Feature',
+      properties: {
+        color: speedToColor(vec.speed),
+        op: Math.min(fade * 0.85, 0.85)
+      },
+      geometry: {
+        type: 'LineString',
+        coordinates: p.trail.slice()
+      }
+    });
   });
 
   map.getSource(SOURCE_TRAILS)?.setData({
     type: 'FeatureCollection',
     features: trailFeatures
   });
-
-  // Queue AFTER doing work, so the flag check at top catches toggles immediately
-  animFrame = requestAnimationFrame(tick);
 }
 
-// ── Legend ──
+// ── Legend + Settings panel ──
 function addLegend() {
   if (document.getElementById('current-legend')) return;
   const el = document.createElement('div');
@@ -281,21 +241,80 @@ function addLegend() {
     color: #e8edf5;
     z-index: 100;
     display: none;
-    min-width: 160px;
+    min-width: 200px;
     backdrop-filter: blur(10px);
   `;
   el.innerHTML = `
     <div style="font-weight:700;margin-bottom:8px;color:#00d4ff;letter-spacing:0.05em">CURRENT SPEED</div>
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-      <div style="width:80px;height:8px;border-radius:4px;background:linear-gradient(to right,rgb(0,80,255),rgb(0,255,255),rgb(0,255,0),rgb(255,255,0),rgb(255,55,0))"></div>
+      <div style="width:120px;height:8px;border-radius:4px;background:linear-gradient(to right,rgb(0,80,255),rgb(0,255,255),rgb(0,255,0),rgb(255,255,0),rgb(255,55,0))"></div>
     </div>
-    <div style="display:flex;justify-content:space-between;color:#6b7a99;margin-bottom:12px">
-      <span>0 m/s</span><span>0.75</span><span>1.5+</span>
+    <div style="display:flex;justify-content:space-between;color:#6b7a99;margin-bottom:14px;width:120px">
+      <span>0</span><span>0.75</span><span>1.5+ m/s</span>
     </div>
-    <div style="font-weight:700;margin-bottom:6px;color:#00d4ff;letter-spacing:0.05em">DIRECTION</div>
-    <div style="color:#6b7a99;line-height:1.5">Arrows show flow direction.<br>Trail length = persistence.</div>
+
+    <div style="border-top:1px solid rgba(255,255,255,0.07);padding-top:12px;">
+      <div style="font-weight:700;margin-bottom:10px;color:#00d4ff;letter-spacing:0.05em">SETTINGS</div>
+
+      <div style="margin-bottom:10px;">
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+          <label style="color:#a0aec0;">Speed</label>
+          <span id="curr-speed-val" style="color:#e8edf5;">1.0</span>
+        </div>
+        <input id="curr-speed" type="range" min="0.1" max="5" step="0.1" value="1.0"
+          style="width:100%;accent-color:#00d4ff;cursor:pointer;">
+      </div>
+
+      <div style="margin-bottom:10px;">
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+          <label style="color:#a0aec0;">Particle count</label>
+          <span id="curr-count-val" style="color:#e8edf5;">4000</span>
+        </div>
+        <input id="curr-count" type="range" min="500" max="15000" step="500" value="4000"
+          style="width:100%;accent-color:#00d4ff;cursor:pointer;">
+      </div>
+
+      <div style="margin-bottom:10px;">
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+          <label style="color:#a0aec0;">Trail length</label>
+          <span id="curr-trail-val" style="color:#e8edf5;">150</span>
+        </div>
+        <input id="curr-trail" type="range" min="10" max="300" step="5" value="150"
+          style="width:100%;accent-color:#00d4ff;cursor:pointer;">
+      </div>
+
+      <div style="margin-bottom:4px;">
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+          <label style="color:#a0aec0;">Particle lifetime</label>
+          <span id="curr-age-val" style="color:#e8edf5;">500</span>
+        </div>
+        <input id="curr-age" type="range" min="50" max="2000" step="50" value="500"
+          style="width:100%;accent-color:#00d4ff;cursor:pointer;">
+      </div>
+    </div>
   `;
   document.body.appendChild(el);
+
+  document.getElementById('curr-speed').addEventListener('input', e => {
+    const val = parseFloat(e.target.value);
+    document.getElementById('curr-speed-val').textContent = val.toFixed(1);
+    setSpeedScale(val);
+  });
+  document.getElementById('curr-count').addEventListener('input', e => {
+    const val = parseInt(e.target.value, 10);
+    document.getElementById('curr-count-val').textContent = val;
+    setParticleCount(val);
+  });
+  document.getElementById('curr-trail').addEventListener('input', e => {
+    const val = parseInt(e.target.value, 10);
+    document.getElementById('curr-trail-val').textContent = val;
+    setTrailLength(val);
+  });
+  document.getElementById('curr-age').addEventListener('input', e => {
+    const val = parseInt(e.target.value, 10);
+    document.getElementById('curr-age-val').textContent = val;
+    setMaxAge(val);
+  });
 }
 
 function emptyFC() {
@@ -306,20 +325,17 @@ function emptyFC() {
 export function setVisible(v) {
   visible = v;
   const legend = document.getElementById('current-legend');
-
   if (!map.getLayer(LAYER_TRAIL)) return;
-  const vis = v ? 'visible' : 'none';
-  map.setLayoutProperty(LAYER_TRAIL, 'visibility', vis);
-  map.setLayoutProperty(LAYER_ARROW, 'visibility', vis);
+
+  map.setLayoutProperty(LAYER_TRAIL, 'visibility', v ? 'visible' : 'none');
   if (legend) legend.style.display = v ? 'block' : 'none';
 
   if (v) {
-    // Update arrow grid with current speed coloring
-    map.getSource(SOURCE_ARROWS)?.setData(buildArrowFeatures());
     spawnParticles();
-    tick();
+    lastTick = 0;
+    if (!animFrame) animFrame = requestAnimationFrame(tick);
   } else {
-    if (animFrame) cancelAnimationFrame(animFrame);
+    if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
     map.getSource(SOURCE_TRAILS)?.setData(emptyFC());
   }
 }
@@ -327,17 +343,39 @@ export function setVisible(v) {
 export function setAnimating(v) {
   animating = v;
   if (v && visible) {
-    tick();
+    lastTick = 0;
+    if (!animFrame) animFrame = requestAnimationFrame(tick);
   } else {
     if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
     map.getSource(SOURCE_TRAILS)?.setData(emptyFC());
   }
 }
 
-export function setSpeedColoring(v) {
-  speedColoring = v;
-  // Rebuild arrow colors
-  if (visible && map.getSource(SOURCE_ARROWS)) {
-    map.getSource(SOURCE_ARROWS).setData(buildArrowFeatures());
-  }
+export function setSpeedColoring(v) { speedColoring = v; }
+
+export function setSpeedScale(v) { SPEED_SCALE = Math.max(0.01, v); }
+
+export function setParticleCount(v) {
+  const n = Math.max(1, Math.round(v));
+  PARTICLE_COUNT = n;
+  while (particles.length < n) particles.push(newParticle());
+  if (particles.length > n) particles.length = n;
+}
+
+export function setTrailLength(v) {
+  TRAIL_LEN = Math.max(2, Math.round(v));
+  particles.forEach(p => { if (p.trail.length > TRAIL_LEN) p.trail = p.trail.slice(-TRAIL_LEN); });
+}
+
+export function setMaxAge(v) {
+  MAX_AGE = Math.max(10, Math.round(v));
+  particles.forEach((p, i) => { if (p.age > MAX_AGE) particles[i] = newParticle(); });
+}
+
+export function setFpsCap(v) { FPS_CAP = Math.max(1, Math.min(60, Math.round(v))); }
+
+export function getSettings() {
+  return { speedScale: SPEED_SCALE, particleCount: PARTICLE_COUNT,
+           trailLength: TRAIL_LEN, maxAge: MAX_AGE, fpsCap: FPS_CAP,
+           speedColoring, animating, visible };
 }
