@@ -1,10 +1,37 @@
 import { enableCompareMode, disableCompareMode, resetHighlight, setVisible as setRiversVisible } from '../layers/rivers.js';
 import { setVisible as setCurrentsVisible, setAnimating, setSpeedColoring } from '../layers/currents.js';
 import { setVisible as setPollutionVisible, setDropMode, clearParticles } from '../layers/pollution.js';
+import { setAutoSourcesVisible } from '../layers/autoParticles.js';
 
 let currentMode = 'rivers';
 
+function applyMapLayers() {
+  const riversOn = document.getElementById('layer-rivers-toggle')?.checked ?? true;
+  const currentsOn = document.getElementById('layer-currents-toggle')?.checked ?? false;
+  setRiversVisible(riversOn);
+  setCurrentsVisible(currentsOn);
+}
+
 export function initControls() {
+  document.getElementById('layer-rivers-toggle')?.addEventListener('change', e => {
+    if (!e.target.checked) {
+      resetHighlight();
+      disableCompareMode();
+      const compareBtn = document.getElementById('compare-btn');
+      const compareClear = document.getElementById('compare-clear');
+      const compareStatus = document.getElementById('compare-status');
+      compareBtn?.classList.remove('hidden');
+      compareClear?.classList.add('hidden');
+      compareStatus?.classList.add('hidden');
+      document.getElementById('river-stats')?.classList.add('hidden');
+    }
+    applyMapLayers();
+  });
+
+  document.getElementById('layer-currents-toggle')?.addEventListener('change', () => {
+    applyMapLayers();
+  });
+
   // Mode tabs
   document.querySelectorAll('.mode-tab').forEach(tab => {
     tab.addEventListener('click', () => {
@@ -49,6 +76,13 @@ export function initControls() {
     const clearBtn = document.getElementById('clear-pollution');
     if (e.target.checked) clearBtn?.classList.remove('hidden');
   });
+  const autoSourcesToggle = document.getElementById('auto-sources-toggle');
+  const autoSourcesInfo = document.getElementById('auto-sources-info');
+  
+  autoSourcesToggle?.addEventListener('change', e => {
+    setAutoSourcesVisible(e.target.checked);
+    autoSourcesInfo?.classList.toggle('hidden', !e.target.checked);
+  });
 
   // Clear pollution
   document.getElementById('clear-pollution')?.addEventListener('click', () => {
@@ -57,6 +91,8 @@ export function initControls() {
     setDropMode(false);
     document.getElementById('clear-pollution')?.classList.add('hidden');
   });
+
+  applyMapLayers();
 }
 
 function switchMode(mode) {
@@ -74,9 +110,6 @@ function switchMode(mode) {
     p.classList.toggle('hidden', p.id !== `panel-${mode}`);
   });
 
-  // Toggle layers
-  setRiversVisible(mode === 'rivers');
-  setCurrentsVisible(mode === 'currents');
   setPollutionVisible(mode === 'pollution');
 
   // Reset river highlight when leaving rivers mode

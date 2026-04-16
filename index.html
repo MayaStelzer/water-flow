@@ -27,6 +27,24 @@
         <button class="mode-tab" data-mode="pollution">Pollution</button>
       </div>
 
+      <div id="map-layers" class="map-layers-card">
+        <div class="map-layers-title">Map layers</div>
+        <div class="toggle-row">
+          <span>Rivers</span>
+          <label class="toggle">
+            <input type="checkbox" id="layer-rivers-toggle" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <span>Ocean currents</span>
+          <label class="toggle">
+            <input type="checkbox" id="layer-currents-toggle" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
       <div id="panel-rivers" class="mode-panel active">
         <p class="panel-hint">Click any river segment to trace its full path to the ocean.</p>
         <div id="compare-controls">
@@ -72,8 +90,24 @@
         <div class="stat-row"><span>Coverage</span><span>Global 0.25°</span></div>
       </div>
 
+      <!-- Replace your existing panel-pollution div with this -->
+
       <div id="panel-pollution" class="mode-panel hidden">
         <p class="panel-hint">Drop a pollution particle on any river to simulate its path to the ocean.</p>
+
+        <!-- ── NEW: Auto-sources toggle ── -->
+        <div class="toggle-row">
+          <span>Show Pollution Sources</span>
+          <label class="toggle">
+            <input type="checkbox" id="auto-sources-toggle">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div id="auto-sources-info" class="hidden" style="font-size:11px; color:#6b7a99; margin: -4px 0 10px 0; line-height:1.5;">
+          15 most polluted rivers — auto-flowing to ocean
+        </div>
+
+        <!-- existing drop mode toggle -->
         <div class="toggle-row">
           <span>Drop Mode</span>
           <label class="toggle">
@@ -81,6 +115,7 @@
             <span class="slider"></span>
           </label>
         </div>
+
         <div id="pollution-stats" class="hidden">
           <div class="stat-row"><span>Status</span><span id="poll-status">—</span></div>
           <div class="stat-row"><span>Distance Left</span><span id="poll-distance">—</span></div>
@@ -88,7 +123,6 @@
         </div>
         <button id="clear-pollution" class="hidden">Clear Particles</button>
       </div>
-    </div>
 
     <div id="tooltip" class="hidden"></div>
 

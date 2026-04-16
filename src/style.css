@@ -113,6 +113,25 @@ html, body {
   font-weight: 700;
 }
 
+/* ── Map layer toggles (always visible) ── */
+.map-layers-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.map-layers-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
 /* ── Panels ── */
 .mode-panel {
   background: var(--surface);

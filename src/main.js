@@ -48,20 +48,13 @@ const map = new maplibregl.Map({
 map.on('load', async () => {
   // Init layers in order
   await initRivers(map);
+  await initCurrents(map).catch(console.error);
 
-  // Currents and pollution init in background
-  initCurrents(map).catch(console.error);
-
-  // Pollution needs river features — wait for graph to be built
   const allFeatures = Object.values(riverIndex);
   initPollution(map, allFeatures);
 
-  // Init UI
   initTooltip();
   initControls();
-
-  // Rivers visible by default
-  // Currents and pollution hidden until tab switch
 });
 
 map.on('error', e => {
