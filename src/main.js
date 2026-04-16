@@ -4,6 +4,7 @@ import { Protocol } from 'pmtiles';
 
 import { initRivers } from './layers/rivers.js';
 import { initCurrents } from './layers/currents.js';
+import { initGyres } from './layers/gyres.js';
 import { initPollution } from './layers/pollution.js';
 import { initControls } from './ui/controls.js';
 import { initTooltip } from './ui/tooltip.js';
@@ -49,6 +50,7 @@ map.on('load', async () => {
   // Init layers in order
   await initRivers(map);
   await initCurrents(map).catch(console.error);
+  initGyres(map);
 
   const allFeatures = Object.values(riverIndex);
   initPollution(map, allFeatures);

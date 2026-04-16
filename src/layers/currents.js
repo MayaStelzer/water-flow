@@ -154,6 +154,8 @@ function integrateFrom(lon0, lat0, maxSteps, sign) {
   for (let i = 0; i < maxSteps; i++) {
     const n = stepPoint(lon, lat, sign);
     if (!n) break;
+    // Avoid antimeridian "long chord" segments (horizontal streaks when zoomed out)
+    if (Math.abs(n.lon - lon) > 90) break;
     lon = n.lon;
     lat = n.lat;
     coords.push([lon, lat]);
@@ -302,11 +304,16 @@ function tick(now) {
     const nv = f.v / mag;
     const cosClamped = Math.max(0.22, Math.abs(Math.cos(p.lat * (Math.PI / 180))));
     const step = BASE_STEP * 1.1;
+    const lonBefore = p.lon;
     p.lon += (step * nu) / cosClamped;
     p.lat += step * nv;
     if (p.lon > 180) p.lon -= 360;
     if (p.lon < -180) p.lon += 360;
     p.lat = Math.max(-85, Math.min(85, p.lat));
+    if (Math.abs(p.lon - lonBefore) > 90) {
+      p.trail = [[p.lon, p.lat]];
+      return;
+    }
 
     if (p.trail.length < 2) return;
     const life = p.age / MAX_AGE;
@@ -431,4 +438,22 @@ export function setSpeedColoring(v) {
   if (!visible) return;
   applyVisibilityStyle();
   if (!animating) rebuildStaticStreamlines();
+}
+
+/** One RK-style step along surface currents (same logic as animated particles). */
+export function advectOceanStep(lon, lat) {
+  const f = sampleField(lon, lat);
+  if (!f || f.speed < 0.012) return null;
+  const mag = Math.hypot(f.u, f.v);
+  const nu = f.u / mag;
+  const nv = f.v / mag;
+  const cosClamped = Math.max(0.22, Math.abs(Math.cos(lat * (Math.PI / 180))));
+  const step = BASE_STEP * 1.1;
+  let nlon = lon + (step * nu) / cosClamped;
+  let nlat = lat + step * nv;
+  if (nlon > 180) nlon -= 360;
+  if (nlon < -180) nlon += 360;
+  nlat = Math.max(-85, Math.min(85, nlat));
+  if (Math.abs(nlon - lon) > 90) return null;
+  return { lon: nlon, lat: nlat, speed: f.speed };
 }

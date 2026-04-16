@@ -1,15 +1,30 @@
-import { riverIndex, upstreamIndex } from '../utils/graph.js';
-import { nearestFeature, interpolateAlong, haversineKm } from '../utils/geo.js';
+import { riverIndex } from '../utils/graph.js';
+import { nearestFeature, interpolateAlong } from '../utils/geo.js';
+import { advectOceanStep } from './currents.js';
 
 let map;
 let particles = [];
 let animFrame = null;
 let canvas, ctx;
 let dropMode = false;
-let visible = false;
 let allFeatures = [];
 
-const SPEED_SCALE = 0.0008; // fraction of segment per frame, scaled by discharge
+const SPEED_SCALE = 0.0008;
+const MAX_OCEAN_FRAMES = 2400;
+const OCEAN_STALL_DONE = 50;
+
+function syncAnimationLoop() {
+  const run = dropMode || particles.length > 0;
+  if (!run) {
+    if (animFrame) {
+      cancelAnimationFrame(animFrame);
+      animFrame = null;
+    }
+    if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+    return;
+  }
+  if (!animFrame) animFrame = requestAnimationFrame(animate);
+}
 
 export function initPollution(mapInstance, features) {
   map = mapInstance;
@@ -38,13 +53,12 @@ function resizeCanvas() {
 }
 
 function onMapClick(e) {
-  if (!dropMode || !visible) return;
+  if (!dropMode) return;
   const { lng, lat } = e.lngLat;
   dropParticle(lng, lat);
 }
 
 function dropParticle(lng, lat) {
-  // Find nearest river segment
   const nearest = nearestFeature([lng, lat], allFeatures);
   if (!nearest) return;
 
@@ -53,47 +67,120 @@ function dropParticle(lng, lat) {
   const distToOcean = nearest.properties.DIST_DN_KM || 0;
 
   particles.push({
+    phase: 'river',
     feature: nearest,
     coords,
-    t: 0,           // progress along current segment (0–1)
+    t: 0,
     distLeft: distToOcean,
     totalDist: distToOcean,
-    reachedOcean: false,
     trail: [],
     speed: SPEED_SCALE * Math.max(1, Math.log10(discharge)),
     id: Date.now() + Math.random()
   });
 
+  canvas.style.display = 'block';
+  syncAnimationLoop();
   updatePollutionStats();
 }
 
-function animate() {
-  if (!visible) return;
-  animFrame = requestAnimationFrame(animate);
+function drawTrailScreen(trail, strokeStyle, lineWidth) {
+  if (trail.length < 2) return;
+  ctx.beginPath();
+  ctx.moveTo(trail[0].x, trail[0].y);
+  for (let i = 1; i < trail.length; i++) {
+    ctx.lineTo(trail[i].x, trail[i].y);
+  }
+  ctx.strokeStyle = strokeStyle;
+  ctx.lineWidth = lineWidth;
+  ctx.stroke();
+}
 
+function drawGarbageEmoji(x, y) {
+  const size = 20;
+  ctx.font = `${size}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('🗑️', x, y);
+}
+
+function drawOceanPulse(x, y) {
+  const pulse = (Math.sin(Date.now() * 0.003) + 1) * 6;
+  ctx.beginPath();
+  ctx.arc(x, y, 12 + pulse, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(0, 212, 255, 0.45)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  drawGarbageEmoji(x, y);
+}
+
+function animate() {
+  if (!dropMode && particles.length === 0) {
+    animFrame = null;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    return;
+  }
+
+  animFrame = requestAnimationFrame(animate);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   particles.forEach(p => {
-    if (p.reachedOcean) {
-      drawReachedOcean(p);
+    if (p.phase === 'done') {
+      const s = p.doneScreen || map.project([p.oceanLon, p.oceanLat]);
+      drawOceanPulse(s.x, s.y);
       return;
     }
 
-    // Advance along segment
+    if (p.phase === 'ocean') {
+      const n = advectOceanStep(p.oceanLon, p.oceanLat);
+      p.oceanFrames = (p.oceanFrames || 0) + 1;
+
+      const screen = map.project([p.oceanLon, p.oceanLat]);
+      p.trail.push({ x: screen.x, y: screen.y });
+      if (p.trail.length > 100) p.trail.shift();
+
+      if (!n) p.oceanStall = (p.oceanStall || 0) + 1;
+      else {
+        p.oceanStall = 0;
+        p.oceanLon = n.lon;
+        p.oceanLat = n.lat;
+      }
+
+      if (p.oceanStall >= OCEAN_STALL_DONE || p.oceanFrames >= MAX_OCEAN_FRAMES) {
+        p.phase = 'done';
+        p.doneScreen = map.project([p.oceanLon, p.oceanLat]);
+      }
+
+      drawTrailScreen(p.trail, 'rgba(0, 212, 255, 0.38)', 2);
+      drawGarbageEmoji(screen.x, screen.y);
+      return;
+    }
+
+    // River phase
     p.t += p.speed;
 
-    // Move to next segment when done
     while (p.t >= 1) {
       p.t -= 1;
       const nextID = p.feature.properties.NEXT_DOWN;
       if (!nextID || nextID === 0) {
-        p.reachedOcean = true;
+        const mouth = p.coords[p.coords.length - 1];
+        p.phase = 'ocean';
+        p.oceanLon = mouth[0];
+        p.oceanLat = mouth[1];
+        p.oceanFrames = 0;
+        p.oceanStall = 0;
+        p.trail = [];
         p.t = 1;
         break;
       }
       const nextFeature = riverIndex[nextID];
       if (!nextFeature) {
-        p.reachedOcean = true;
+        const mouth = p.coords[p.coords.length - 1];
+        p.phase = 'ocean';
+        p.oceanLon = mouth[0];
+        p.oceanLat = mouth[1];
+        p.oceanFrames = 0;
+        p.oceanStall = 0;
+        p.trail = [];
         break;
       }
       p.feature = nextFeature;
@@ -101,71 +188,18 @@ function animate() {
       p.distLeft = nextFeature.properties.DIST_DN_KM || 0;
     }
 
-    // Current position
+    if (p.phase === 'ocean') return;
+
     const pos = interpolateAlong(p.coords, p.t);
     const screen = map.project(pos);
-
-    // Add to trail
     p.trail.push({ x: screen.x, y: screen.y });
     if (p.trail.length > 80) p.trail.shift();
 
-    // Draw trail
-    drawTrail(p);
-
-    // Draw particle
-    drawParticle(screen.x, screen.y, false);
+    drawTrailScreen(p.trail, 'rgba(255, 50, 50, 0.4)', 2);
+    drawGarbageEmoji(screen.x, screen.y);
   });
 
   updatePollutionStats();
-}
-
-function drawTrail(p) {
-  if (p.trail.length < 2) return;
-  ctx.beginPath();
-  ctx.moveTo(p.trail[0].x, p.trail[0].y);
-  for (let i = 1; i < p.trail.length; i++) {
-    const alpha = i / p.trail.length;
-    ctx.lineTo(p.trail[i].x, p.trail[i].y);
-  }
-  ctx.strokeStyle = 'rgba(255, 50, 50, 0.4)';
-  ctx.lineWidth = 2;
-  ctx.stroke();
-}
-
-function drawParticle(x, y, atOcean) {
-  const color = atOcean ? '#ff6b35' : '#ff3232';
-  const radius = atOcean ? 8 : 5;
-
-  // Glow
-  const grd = ctx.createRadialGradient(x, y, 0, x, y, radius * 2.5);
-  grd.addColorStop(0, atOcean ? 'rgba(255,107,53,0.6)' : 'rgba(255,50,50,0.5)');
-  grd.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.beginPath();
-  ctx.arc(x, y, radius * 2.5, 0, Math.PI * 2);
-  ctx.fillStyle = grd;
-  ctx.fill();
-
-  // Core dot
-  ctx.beginPath();
-  ctx.arc(x, y, radius, 0, Math.PI * 2);
-  ctx.fillStyle = color;
-  ctx.fill();
-}
-
-function drawReachedOcean(p) {
-  // Pulse animation at final position
-  const pos = p.coords[p.coords.length - 1];
-  const screen = map.project(pos);
-  const pulse = (Math.sin(Date.now() * 0.003) + 1) * 6;
-
-  drawParticle(screen.x, screen.y, true);
-
-  // Pulse ring
-  ctx.beginPath();
-  ctx.arc(screen.x, screen.y, 10 + pulse, 0, Math.PI * 2);
-  ctx.strokeStyle = 'rgba(255, 107, 53, 0.4)';
-  ctx.lineWidth = 2;
-  ctx.stroke();
 }
 
 function updatePollutionStats() {
@@ -177,44 +211,49 @@ function updatePollutionStats() {
   if (!panel || particles.length === 0) return;
   panel.classList.remove('hidden');
 
-  const active = particles.filter(p => !p.reachedOcean);
-  const reached = particles.filter(p => p.reachedOcean);
+  const activeRiver = particles.filter(p => p.phase === 'river');
+  const activeOcean = particles.filter(p => p.phase === 'ocean');
+  const done = particles.filter(p => p.phase === 'done');
 
-  if (statusEl) statusEl.textContent =
-    reached.length > 0
-      ? `${reached.length} reached ocean`
-      : `${active.length} in transit`;
+  if (statusEl) {
+    if (activeOcean.length > 0) statusEl.textContent = `${activeOcean.length} following currents`;
+    else if (activeRiver.length > 0) statusEl.textContent = `${activeRiver.length} in river`;
+    else if (done.length > 0) statusEl.textContent = `${done.length} path finished`;
+    else statusEl.textContent = '—';
+  }
 
-  const p = active[0] || particles[0];
-  if (distEl) distEl.textContent = p.reachedOcean
-    ? 'At ocean outlet'
-    : `~${Math.round(p.distLeft).toLocaleString()} km`;
+  const p = activeRiver[0] || activeOcean[0] || particles[0];
+  if (distEl) {
+    if (p.phase === 'river') {
+      distEl.textContent = p.distLeft != null ? `~${Math.round(p.distLeft).toLocaleString()} km` : '—';
+    } else if (p.phase === 'ocean') {
+      distEl.textContent = 'Surface drift (model)';
+    } else {
+      distEl.textContent = 'See map';
+    }
+  }
 
-  if (timeEl) timeEl.textContent = particles.length > 0
-    ? `${particles.length} particle${particles.length > 1 ? 's' : ''} total`
-    : '—';
-}
-
-export function setVisible(v) {
-  visible = v;
-  if (!canvas) return;
-  canvas.style.display = v ? 'block' : 'none';
-  if (v) {
-    animate();
-  } else {
-    if (animFrame) cancelAnimationFrame(animFrame);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (timeEl) {
+    timeEl.textContent = `${particles.length} marker${particles.length > 1 ? 's' : ''}`;
   }
 }
 
 export function setDropMode(v) {
   dropMode = v;
   map.getCanvas().style.cursor = v ? 'crosshair' : '';
+  if (!v && particles.length === 0) canvas.style.display = 'none';
+  else if (v || particles.length > 0) canvas.style.display = 'block';
+  syncAnimationLoop();
 }
 
 export function clearParticles() {
   particles = [];
+  if (animFrame) {
+    cancelAnimationFrame(animFrame);
+    animFrame = null;
+  }
   if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+  canvas.style.display = 'none';
   const panel = document.getElementById('pollution-stats');
   if (panel) panel.classList.add('hidden');
   const clearBtn = document.getElementById('clear-pollution');

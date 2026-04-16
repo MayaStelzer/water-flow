@@ -81,36 +81,32 @@ html, body {
   margin-top: 1px;
 }
 
-/* ── Mode Tabs ── */
-#mode-tabs {
+/* ── Sidebar stack ── */
+.sidebar-panels {
   display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: calc(100vh - 200px);
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.sidebar-section {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 4px;
-  gap: 3px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.mode-tab {
-  flex: 1;
-  padding: 7px 0;
-  font-family: var(--font);
-  font-size: 12px;
-  font-weight: 500;
-  background: transparent;
-  border: none;
-  border-radius: 7px;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.mode-tab:hover { color: var(--text); background: var(--surface2); }
-
-.mode-tab.active {
-  background: var(--accent-blue);
-  color: #000;
+.sidebar-section-title {
+  font-size: 11px;
   font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-blue);
 }
 
 /* ── Map layer toggles (always visible) ── */
@@ -131,19 +127,6 @@ html, body {
   text-transform: uppercase;
   color: var(--text-muted);
 }
-
-/* ── Panels ── */
-.mode-panel {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.mode-panel.hidden { display: none; }
 
 .panel-hint {
   font-size: 12px;
