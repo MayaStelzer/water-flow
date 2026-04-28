@@ -22,7 +22,7 @@ export async function initRivers(mapInstance) {
   map = mapInstance;
 
   // Load full GeoJSON for graph traversal (needed for upstream/downstream logic)
-  const res = await fetch('/data/rivers.geojson');
+  const res = await fetch(`${import.meta.env.BASE_URL}data/rivers.json`);
   const data = await res.json();
   allFeatures = data.features;
   buildIndexes(allFeatures);
