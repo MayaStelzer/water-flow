@@ -340,7 +340,7 @@ function applyVisibilityStyle() {
 
 export async function initCurrents(mapInstance) {
   map = mapInstance;
-  const res = await fetch(`${import.meta.env.BASE_URL}data/currents.json`);
+  const res = await fetch(`${import.meta.env.BASE_URL}data/currents.geojson`);
   const vectors = await res.json();
   buildGrids(vectors);
 
