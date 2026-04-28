@@ -30,7 +30,7 @@ export async function initRivers(mapInstance) {
   // Add PMTiles source for rendering
   map.addSource(SOURCE_ID, {
     type: 'vector',
-    url: `pmtiles://${window.location.origin}/data/rivers.pmtiles`
+    url: `pmtiles://${window.location.origin}${import.meta.env.BASE_URL}data/rivers.pmtiles`
   });
 
   // Base river layer — width and opacity driven by discharge + stream order
