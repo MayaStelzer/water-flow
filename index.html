@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Global Water Flow Explorer</title>
+    <link href="https://api.fontshare.com/v2/css?f[]=satoshi@700,500,400&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/maplibre-gl/dist/maplibre-gl.css" />
+    <script type="module" crossorigin src="/water-flow/assets/index-BS0vyZkV.js"></script>
+    <link rel="stylesheet" crossorigin href="/water-flow/assets/index-ke4hMFOd.css">
+  </head>
+  <body>
+    <div id="map"></div>
+
+    <div id="ui">
+      <div id="header">
+        <div id="header-title">
+          <span class="title-drop">&#9651;</span>
+          <div>
+            <h1>Water Flow</h1>
+            <p>Global River & Ocean Explorer</p>
+          </div>
+        </div>
+      </div>
+
+      <div id="map-layers" class="map-layers-card">
+        <div class="map-layers-title">Map layers</div>
+        <div class="toggle-row">
+          <span>Rivers</span>
+          <label class="toggle">
+            <input type="checkbox" id="layer-rivers-toggle" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <span>Ocean currents</span>
+          <label class="toggle">
+            <input type="checkbox" id="layer-currents-toggle" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <span>Garbage gyres</span>
+          <label class="toggle">
+            <input type="checkbox" id="layer-gyres-toggle">
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div id="sidebar-panels" class="sidebar-panels">
+        <section class="sidebar-section">
+          <h2 class="sidebar-section-title">Ocean currents</h2>
+          <p class="panel-hint">OSCAR NRT–style surface flow (March 2026). Turn on garbage gyres to compare patterns.</p>
+          <div class="toggle-row">
+            <span>Animate</span>
+            <label class="toggle">
+              <input type="checkbox" id="animate-toggle" checked>
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="toggle-row">
+            <span>Speed coloring</span>
+            <label class="toggle">
+              <input type="checkbox" id="speed-color-toggle" checked>
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="stat-row"><span>Max speed</span><span>~2.5 m/s</span></div>
+          <div class="stat-row"><span>Coverage</span><span>Global 0.25°</span></div>
+        </section>
+
+        <section class="sidebar-section">
+          <h2 class="sidebar-section-title">Rivers</h2>
+          <p class="panel-hint">Click a river segment to trace its path to the ocean.</p>
+          <div id="compare-controls">
+            <button id="compare-btn">Compare Two Basins</button>
+            <button id="compare-clear" class="hidden">Clear</button>
+          </div>
+          <div id="compare-status" class="hidden">
+            <div class="compare-item" id="basin-a-label">
+              <span class="dot" style="background:#00d4ff"></span>
+              <span>Basin A — click a river</span>
+            </div>
+            <div class="compare-item" id="basin-b-label">
+              <span class="dot" style="background:#ff6b35"></span>
+              <span>Basin B — click a river</span>
+            </div>
+          </div>
+          <div id="river-stats" class="hidden">
+            <div class="stat-row"><span>River system</span><span id="stat-name">—</span></div>
+            <div class="stat-row"><span>Discharge</span><span id="stat-discharge">—</span></div>
+            <div class="stat-row"><span>Length to ocean</span><span id="stat-length">—</span></div>
+            <div class="stat-row"><span>Basin type</span><span id="stat-endorheic">—</span></div>
+            <div class="stat-row"><span>Stream order</span><span id="stat-order">—</span></div>
+          </div>
+        </section>
+
+        <section class="sidebar-section">
+          <h2 class="sidebar-section-title">Track debris</h2>
+          <p class="panel-hint">Drop a marker on a river: it follows the network to the coast, then drifts with ocean surface currents.</p>
+          <div class="toggle-row">
+            <span>Show pollution sources</span>
+            <label class="toggle">
+              <input type="checkbox" id="auto-sources-toggle">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div id="auto-sources-info" class="hidden" style="font-size:11px; color:#6b7a99; margin: -4px 0 4px 0; line-height:1.5;">
+            15 most polluted rivers — auto-flowing to ocean
+          </div>
+          <div class="toggle-row">
+            <span>Drop mode</span>
+            <label class="toggle">
+              <input type="checkbox" id="drop-toggle">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div id="pollution-stats" class="hidden">
+            <div class="stat-row"><span>Status</span><span id="poll-status">—</span></div>
+            <div class="stat-row"><span>Progress</span><span id="poll-distance">—</span></div>
+            <div class="stat-row"><span>Markers</span><span id="poll-time">—</span></div>
+          </div>
+          <button id="clear-pollution" class="hidden">Clear markers</button>
+        </section>
+      </div>
+    </div>
+
+    <div id="tooltip" class="hidden"></div>
+
+  </body>
+</html>
