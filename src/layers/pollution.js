@@ -12,6 +12,7 @@ let allFeatures = [];
 const SPEED_SCALE = 0.0008;
 const MAX_OCEAN_FRAMES = 2400;
 const OCEAN_STALL_DONE = 50;
+const PARTICLES_PER_DROP = 4;
 
 function syncAnimationLoop() {
   const run = dropMode || particles.length > 0;
@@ -55,10 +56,12 @@ function resizeCanvas() {
 function onMapClick(e) {
   if (!dropMode) return;
   const { lng, lat } = e.lngLat;
-  dropParticle(lng, lat);
+  for (let i = 0; i < PARTICLES_PER_DROP; i++) {
+    dropParticle(lng, lat, i);
+  }
 }
 
-function dropParticle(lng, lat) {
+function dropParticle(lng, lat, index) {
   const nearest = nearestFeature([lng, lat], allFeatures);
   if (!nearest) return;
 
@@ -66,15 +69,26 @@ function dropParticle(lng, lat) {
   const discharge = nearest.properties.DIS_AV_CMS || 100;
   const distToOcean = nearest.properties.DIST_DN_KM || 0;
 
+  // Stagger start position slightly along the segment so particles spread
+  const tOffset = (index / PARTICLES_PER_DROP) * 0.8;
+  // Each particle gets a unique random jitter applied during interpolation
+  const tDeviation = (Math.random() - 0.5) * 0.18;
+  // Speed varies ±30% per particle
+  const speedMult = 0.7 + Math.random() * 0.6;
+  // Unique hue shift so particles are subtly different colours
+  const hueShift = Math.round((Math.random() - 0.5) * 30);
+
   particles.push({
     phase: 'river',
     feature: nearest,
     coords,
-    t: 0,
+    t: tOffset,
     distLeft: distToOcean,
     totalDist: distToOcean,
     trail: [],
-    speed: SPEED_SCALE * Math.max(1, Math.log10(discharge)),
+    speed: SPEED_SCALE * Math.max(1, Math.log10(discharge)) * speedMult,
+    tDeviation,
+    hueShift,
     id: Date.now() + Math.random()
   });
 
@@ -83,34 +97,66 @@ function dropParticle(lng, lat) {
   updatePollutionStats();
 }
 
-function drawTrailScreen(trail, strokeStyle, lineWidth) {
+// Draw a fading trail where opacity decreases toward the tail
+function drawTrailScreen(trail, r, g, b, lineWidth) {
   if (trail.length < 2) return;
-  ctx.beginPath();
-  ctx.moveTo(trail[0].x, trail[0].y);
   for (let i = 1; i < trail.length; i++) {
+    const alpha = (i / trail.length) * 0.55;
+    ctx.beginPath();
+    ctx.moveTo(trail[i - 1].x, trail[i - 1].y);
     ctx.lineTo(trail[i].x, trail[i].y);
+    ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    ctx.lineWidth = lineWidth;
+    ctx.stroke();
   }
-  ctx.strokeStyle = strokeStyle;
-  ctx.lineWidth = lineWidth;
-  ctx.stroke();
 }
 
-function drawGarbageEmoji(x, y) {
-  const size = 20;
-  ctx.font = `${size}px sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('🗑️', x, y);
-}
+function drawGlowOrb(x, y, r, g, b, radius = 7) {
+  const t = Date.now() * 0.004;
+  const pulse = Math.sin(t) * 2;
+  const outerR = radius + pulse + 5;
 
-function drawOceanPulse(x, y) {
-  const pulse = (Math.sin(Date.now() * 0.003) + 1) * 6;
+  // Soft outer glow ring
+  const grd = ctx.createRadialGradient(x, y, 0, x, y, outerR);
+  grd.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.55)`);
+  grd.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, 0.18)`);
+  grd.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
   ctx.beginPath();
-  ctx.arc(x, y, 12 + pulse, 0, Math.PI * 2);
-  ctx.strokeStyle = 'rgba(0, 212, 255, 0.45)';
-  ctx.lineWidth = 2;
+  ctx.arc(x, y, outerR, 0, Math.PI * 2);
+  ctx.fillStyle = grd;
+  ctx.fill();
+
+  // Solid bright core
+  ctx.beginPath();
+  ctx.arc(x, y, radius * 0.55, 0, Math.PI * 2);
+  ctx.fillStyle = `rgba(${Math.min(r + 80, 255)}, ${Math.min(g + 80, 255)}, ${Math.min(b + 80, 255)}, 0.95)`;
+  ctx.fill();
+}
+
+function drawOceanPulse(x, y, hueShift) {
+  const t = Date.now() * 0.003;
+  const pulse = (Math.sin(t) + 1) * 5;
+
+  // Expanding ring
+  ctx.beginPath();
+  ctx.arc(x, y, 13 + pulse, 0, Math.PI * 2);
+  ctx.strokeStyle = `hsla(${185 + hueShift}, 100%, 65%, 0.4)`;
+  ctx.lineWidth = 1.5;
   ctx.stroke();
-  drawGarbageEmoji(x, y);
+
+  // Orb in ocean blue/cyan palette
+  const [r, g, b] = hslToRgb(185 + hueShift, 100, 60);
+  drawGlowOrb(x, y, r, g, b, 6);
+}
+
+// Utility: convert HSL to RGB integers
+function hslToRgb(h, s, l) {
+  h = ((h % 360) + 360) % 360;
+  s /= 100; l /= 100;
+  const k = n => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  return [Math.round(f(0) * 255), Math.round(f(8) * 255), Math.round(f(4) * 255)];
 }
 
 function animate() {
@@ -124,9 +170,11 @@ function animate() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   particles.forEach(p => {
+    const hue = p.hueShift || 0;
+
     if (p.phase === 'done') {
       const s = p.doneScreen || map.project([p.oceanLon, p.oceanLat]);
-      drawOceanPulse(s.x, s.y);
+      drawOceanPulse(s.x, s.y, hue);
       return;
     }
 
@@ -150,8 +198,8 @@ function animate() {
         p.doneScreen = map.project([p.oceanLon, p.oceanLat]);
       }
 
-      drawTrailScreen(p.trail, 'rgba(0, 212, 255, 0.38)', 2);
-      drawGarbageEmoji(screen.x, screen.y);
+      drawTrailScreen(p.trail, 0, 212, 255, 2);
+      drawOceanPulse(screen.x, screen.y, hue);
       return;
     }
 
@@ -190,13 +238,17 @@ function animate() {
 
     if (p.phase === 'ocean') return;
 
-    const pos = interpolateAlong(p.coords, p.t);
+    // Clamp t with per-particle deviation for path spread
+    const tJittered = Math.max(0, Math.min(1, p.t + p.tDeviation));
+    const pos = interpolateAlong(p.coords, tJittered);
     const screen = map.project(pos);
     p.trail.push({ x: screen.x, y: screen.y });
     if (p.trail.length > 80) p.trail.shift();
 
-    drawTrailScreen(p.trail, 'rgba(255, 50, 50, 0.4)', 2);
-    drawGarbageEmoji(screen.x, screen.y);
+    // River: warm red/orange palette with per-particle hue shift
+    const [r, g, b] = hslToRgb(5 + hue, 95, 58);
+    drawTrailScreen(p.trail, r, g, b, 2);
+    drawGlowOrb(screen.x, screen.y, r, g, b, 7);
   });
 
   updatePollutionStats();
